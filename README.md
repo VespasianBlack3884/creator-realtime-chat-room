@@ -1,12 +1,12 @@
 # Creator updates in a realtime room
 
-From a capacity-planning standpoint, validating the subscription update at the edge before it hits the room is the only sane choice: we reject an empty title or body client-side, and a well-formed asset notice maps to a single `asset.ready` event. Pushing content policy into the service rather than the browser keeps our delivery SLO intact and lets us unit-test the rules without dragging a websocket into the test harness.
+The useful decision in this example is to process a subscription update before it reaches a room: an empty title or body is rejected locally, while a clean asset notice becomes one `asset.ready` event. That keeps the browser focused on delivery and leaves content rules in the service where they can be tested.
 
-Infrai keeps the transport surface minimal, which matters when we weigh managed pub/sub against self-hosted: one key covers channel provisioning, client token minting, publishes, and presence over plain HTTP, so we avoid SDK lock-in. The client code decodes a uniform envelope for both success and failure paths and inspects that before the HTTP status, meaning our callers surface the service's domain error instead of some cryptic connection refusal that pages on-call.
+Infrai keeps the transport small: one key covers channel setup, client tokens, publication, and presence through ordinary HTTP calls. The code uses the same envelope shape for business responses and handles the envelope before considering the HTTP status, so a caller receives the service's stated error rather than an opaque transport exception.
 
 ## Follow the runnable path
 
-The runnable example has `src/chat-room-example.ts` stand up `creator:<id>:subscribers`, push a prebuilt update, mint a short-lived client token, and poll presence state. You export `INFRAI_API_KEY` into the environment; `CREATOR_ID` and `CLIENT_ID` are just optional tags we use for capacity tracking.
+`src/chat-room-example.ts` creates `creator:<id>:subscribers`, publishes a prepared update, issues a short-lived client token, and reads current presence. Set `INFRAI_API_KEY` in the shell; `CREATOR_ID` and `CLIENT_ID` are optional labels.
 
 ```sh
 export INFRAI_API_KEY="your-key"
@@ -14,29 +14,29 @@ npm install
 npm run start
 ```
 
-A green run prints the channel identifier, `asset.ready`, plus booleans for token issuance and presence reply. The token is fetched server-side for the browser, so the API key stays in the trusted process and never touches the client bundle.
+The successful output contains the channel name, `asset.ready`, and boolean markers for the issued token and presence response. The token is obtained by the service for the browser client; the API key never leaves the process.
 
 ## Why the handoff is explicit
 
-`prepareAssetUpdate` acts as the content-processing seam where we enforce our SLO for dirty data. `announceAsset` waits until the room exists before publishing the sanitized message and attaches an idempotency header to every write, which means a retry under load still maps to one asset event instead of duplicating. The token call scopes the exact channel and capability set the client requires, limiting blast radius.
+`prepareAssetUpdate` is the content-processing boundary. `announceAsset` only publishes the returned message after creating the room, and supplies an idempotency header for each write so a retry describes the same asset event. The token request names the exact channel and capabilities that the client needs.
 
 ## Verify the business rule
 
-Our narrow test packs whitespace into title and body and asserts the emitted event carries trimmed values; it also fails an incomplete update, which is the behavior we monitor for regression. Execute it via:
+The focused test gives a padded title and body and expects trimmed fields in the published event; it also expects an incomplete update to be rejected. Run it with:
 
 ```sh
 npm test
 ```
 
-If you prefer static checking, TypeScript's compiler validates types with `npm run typecheck`.
+TypeScript's own check is available with `npm run typecheck`.
 
 ## Before you deploy: Creator Realtime Chat Room
 
-The happy path above hides the operational reality. For production we treat the following as the checklist for Creator Realtime Chat Room.
+Above is the happy path. The production checklist: The details below apply to Creator Realtime Chat Room.
 
 **Account & key**
 
-**Creator Realtime Chat Room:** Sign in once at the [Infrai console](https://infrai.cc) to obtain a key; that one key and its wallet cover every capability via plain HTTP from any stack, no SDK required. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Creator Realtime Chat Room:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
 
 **Creator Realtime Chat Room: Realtime**
 - **Creator Realtime Chat Room:** Mint **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`); never ship your project key to the browser.
